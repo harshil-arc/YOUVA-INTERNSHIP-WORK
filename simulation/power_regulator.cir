@@ -1,0 +1,45 @@
+* Smart IAQ monitor power-path concept simulation (LTspice behavioral netlist)
+* Educational abstraction only; not a TP4056, LiPo, or LDO vendor macro-model.
+* The external idealized source mux is explicit: TP4056 alone has no load-sharing path.
+
+.param USB_R=0.20
+.param BAT_CAPACITY_F=6000
+.param BAT_ESR=0.12
+.param LDO_DROPOUT=0.15
+.param LDO_LIMIT_V=3.45
+.param BAT_UVLO=3.00
+.param LOAD_R=33
+
+* USB-C 5 V source with a simple cable/input resistance; disconnect at 10 s.
+VUSB_SOURCE USB_SOURCE 0 PWL(0 5 10 5 10.01 0 40000 0)
+RUSB USB_SOURCE USB USB_R
+
+* Single-cell charge controller approximation: 500 mA CC, then linear CV taper
+* from 4.15 V to 4.20 V. It omits thermal control, timers, termination details,
+* reverse blocking, protection, and all TP4056-specific internal dynamics.
+BTP4056 USB BAT I=if(V(USB)>4.5,if(V(BAT)<4.15,0.5,if(V(BAT)<4.20,10*(4.20-V(BAT)),0)),0)
+
+* Battery capacity is represented by 6000 F, corresponding approximately to
+* 2 Ah over a 1.2 V state-of-charge span. ESR is in series with the capacity node.
+CBAT SOC 0 {BAT_CAPACITY_F} IC=3.65
+RBAT SOC BAT {BAT_ESR}
+
+* Idealized external power mux: USB has priority; battery powers SYS after unplug.
+* A real design needs a selected power-mux/load-share IC with reverse-current control.
+BMUX SYS 0 V=if(V(USB)>4.5,5,if(V(BAT)>BAT_UVLO,V(BAT),0))
+
+* Dropout-limited 3.3 V LDO with simple output resistance; current limit is omitted.
+* The output tracks input minus dropout below the regulation threshold.
+BLDO NREG 0 V=if(V(SYS)>LDO_LIMIT_V,3.3,max(0,V(SYS)-LDO_DROPOUT))
+R_LDO_OUT NREG 3V3 0.10
+
+* Representative 100 mA-equivalent 3.3 V system load.
+RLOAD 3V3 0 {LOAD_R}
+
+* Simplified battery undervoltage observation point; no physical cell protection model.
+.meas TRAN VUSB_MIN MIN V(USB) FROM=0 TO=40000
+.meas TRAN VBAT_FINAL FIND V(BAT) AT=40000
+.meas TRAN V3V3_FINAL FIND V(3V3) AT=40000
+.tran 0 40000 0 5 startup
+.options plotwinsize=0
+.end
